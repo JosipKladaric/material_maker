@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>MaterialMaker Web — PBR Texture Authoring</title>
+<link rel="stylesheet" href="styles.css"/>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<header id="topbar">
+  <div class="brand">◈ MaterialMaker <span>web</span></div>
+  <div class="top-actions">
+    <label class="btn">Import <input id="fileInput" type="file" accept=".obj,.gltf,.glb,.stl" hidden/></label>
+    <button id="btnDemo" class="btn ghost" title="Load demo torus knot">Demo mesh</button>
+    <button id="btnSave" class="btn ghost">Save project</button>
+    <label class="btn ghost">Load <input id="projInput" type="file" accept=".json" hidden/></label>
+    <div class="sep"></div>
+    <button id="btnExportPNG" class="btn primary">Export PNGs</button>
+    <button id="btnExportGLB" class="btn ghost">Export GLB</button>
+  </div>
+  <div id="status">ready — import a mesh or try Demo mesh</div>
+</header>
+
+<main id="layout">
+  <!-- left rail -->
+  <nav id="rail">
+    <button data-tool="paint" class="active" title="Paint (B)">🖌</button>
+    <button data-tool="erase" title="Eraser (E)">🧽</button>
+    <button data-tool="fill" title="Fill layer with material">🪣</button>
+    <button data-tool="picker" title="Pick color/ID">💉</button>
+    <div class="rail-sep"></div>
+    <button id="railUV" title="Auto-UV">❏</button>
+    <button id="railBake" title="Bake maps">🔥</button>
+    <button id="railSolo" title="Cycle viewport solo view (1-7)">👁</button>
+  </nav>
+
+  <!-- viewport -->
+  <section id="viewportWrap">
+    <canvas id="gl"></canvas>
+    <div id="viewbar">
+      <select id="soloView" title="Viewport channel">
+        <option value="pbr">PBR shaded</option>
+        <option value="albedo">Albedo</option>
+        <option value="normal">Normal</option>
+        <option value="roughness">Roughness</option>
+        <option value="metalness">Metalness</option>
+        <option value="ao">AO (baked)</option>
+        <option value="uv">UV / checker</option>
+        <option value="wire">Wireframe</option>
+      </select>
+      <label>Env <input id="envIntensity" type="range" min="0" max="2" step="0.05" value="1"/></label>
+      <label>Tex size
+        <select id="texSize">
+          <option>512</option><option selected>1024</option><option>2048</option>
+        </select>
+      </label>
+      <span id="triCount"></span>
+    </div>
+    <div id="dropHint">drop .obj / .glb / .gltf / .stl here<br/><small>or use Import / Demo mesh</small></div>
+    <div id="bakeProgress" hidden><div id="bakeBar"></div><span id="bakeLabel"></span></div>
+  </section>
+
+  <!-- right panels -->
+  <aside id="side">
+    <section class="panel">
+      <h3>Mesh / UV</h3>
+      <div class="row">
+        <select id="uvMode">
+          <option value="keep">Keep original UVs</option>
+          <option value="box">Auto: Box projection</option>
+          <option value="spherical">Auto: Spherical</option>
+          <option value="planar">Auto: Planar (Y)</option>
+        </select>
+        <button id="btnApplyUV" class="btn small">Apply</button>
+      </div>
+      <div class="row"><small id="uvInfo">no mesh</small></div>
+    </section>
+
+    <section class="panel">
+      <h3>Baker</h3>
+      <div class="grid2">
+        <label>AO rays <input id="aoSamples" type="number" value="48" min="8" max="256"/></label>
+        <label>AO dist <input id="aoDist" type="number" value="1.5" step="0.1" min="0.1" max="10"/></label>
+      </div>
+      <div class="row">
+        <button id="btnBake" class="btn small primary">Bake maps</button>
+        <button id="btnCancelBake" class="btn small ghost">Cancel</button>
+      </div>
+      <small>Bakes world normal, position, ID, AO, curvature at Tex size. Uses GPU raster + CPU raycast (BVH). Watch progress bar.</small>
+      <div id="bakeList" class="chips"></div>
+    </section>
+
+    <section class="panel grow">
+      <h3>Layers <button id="btnAddLayer" class="btn small">+ Fill</button> <button id="btnAddPaint" class="btn small">+ Paint</button></h3>
+      <div id="layerList"></div>
+    </section>
+
+    <section class="panel">
+      <h3>Material <span id="layerName"></span></h3>
+      <div class="row wrap" id="presetRow"></div>
+      <div class="grid2">
+        <label>Base <input id="matColor" type="color" value="#8a8f98"/></label>
+        <label>Opacity <input id="matOpacity" type="range" min="0" max="1" step="0.01" value="1"/></label>
+        <label>Rough <input id="matRough" type="range" min="0" max="1" step="0.01" value="0.5"/></label>
+        <label>Metal <input id="matMetal" type="range" min="0" max="1" step="0.01" value="0"/></label>
+      </div>
+      <div class="row">
+        <select id="matBlend">
+          <option value="normal">Normal</option><option value="multiply">Multiply</option>
+          <option value="screen">Screen</option><option value="overlay">Overlay</option><option value="add">Add</option>
+        </select>
+        <select id="maskGen">
+          <option value="fill">Mask: Fill white</option>
+          <option value="ao">Mask: AO dirt</option>
+          <option value="curvature">Mask: Curvature edge</option>
+          <option value="edge">Mask: Edge wear (curv×top)</option>
+          <option value="top">Mask: Top grunge</option>
+          <option value="bottom">Mask: Bottom grunge</option>
+          <option value="black">Mask: Fill black</option>
+        </select>
+        <button id="btnApplyMask" class="btn small">Apply mask</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>Brush</h3>
+      <div class="grid2">
+        <label>Size <input id="brushSize" type="range" min="2" max="256" value="48"/></label>
+        <label>Flow <input id="brushFlow" type="range" min="0.05" max="1" step="0.05" value="0.8"/></label>
+        <label>Soft <input id="brushSoft" type="range" min="0" max="1" step="0.05" value="0.5"/></label>
+        <label>Spacing <input id="brushSpacing" type="range" min="0.05" max="0.5" step="0.05" value="0.15"/></label>
+      </div>
+      <div class="row">
+        <select id="brushTarget">
+          <option value="mask">Paint → Mask (reveal)</option>
+          <option value="color">Paint → Color</option>
+        </select>
+        <input id="brushColor" type="color" value="#cc3333"/>
+      </div>
+      <small>Paint in 3D viewport (drag). <kbd>B</kbd> paint, <kbd>E</kbd> eraser, <kbd>[</kbd><kbd>]</kbd> size. Right-drag orbits, wheel zooms.</small>
+    </section>
+  </aside>
+</main>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
