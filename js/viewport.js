@@ -12,10 +12,11 @@ export class Viewport {
     this.scene.background = new THREE.Color(0x14161a);
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
     this.camera.position.set(2.2, 1.6, 2.6);
-    this.controls = new OrbitControls(camera, canvas);
+    this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
-    // mouse buttons: left paint, middle zoom, right orbit (so left can paint)
-    this.controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+    // Left orbits by default; the painter disables controls mid-stroke (or skips when
+    // Alt / orbit tool is used) so painting and orbiting share the button.
+    this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
     this.controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 
     const pmrem = new THREE.PMREMGenerator(this.renderer);
@@ -31,7 +32,8 @@ export class Viewport {
 
     this.mesh = null;
     this.solo = 'pbr';
-    this.maps = {}; // {albedo, normal, roughness, metalness, ao}
+    this.maps = {}; // {albedo, normal, roughness, metalness, ao, curvature, id, position}
+    this._liveTextures = [];
     this.uvChecker = makeCheckerTexture();
     this.mat = new THREE.MeshStandardMaterial({ color: 0x8a8f98, roughness: 0.6, metalness: 0.0 });
     this.wireMat = new THREE.MeshBasicMaterial({ wireframe: true, color: 0xe8b34b });
@@ -77,6 +79,10 @@ export class Viewport {
   updateMaps(maps) { this.maps = maps; this.refreshMaterial(); }
   refreshMaterial() {
     if (!this.mesh) return;
+    // Dispose textures from the previous composite — painting creates a new set per
+    // stroke and would otherwise leak GPU memory within minutes.
+    for (const tx of this._liveTextures) tx.dispose();
+    this._liveTextures = [];
     const t = (cv, srgb, def) => {
       if (!cv) return def ?? null;
       const tx = new THREE.CanvasTexture(cv);
@@ -84,6 +90,7 @@ export class Viewport {
       // Canvas convention: top row = v=1. Default flipY=true keeps bake/paint/viewport/export consistent.
       tx.wrapS = tx.wrapT = THREE.ClampToEdgeWrapping;
       tx.anisotropy = 4;
+      this._liveTextures.push(tx);
       return tx;
     };
     this.mesh.traverse(o => {
@@ -95,6 +102,9 @@ export class Viewport {
       const rough = t(this.maps.roughness, false, null);
       const metal = t(this.maps.metalness, false, null);
       const ao = t(this.maps.ao, false, null);
+      const curv = t(this.maps.curvature, false, null);
+      const idm = t(this.maps.id, true, null);
+      const posm = t(this.maps.position, false, null);
       m.map = null; m.normalMap = null; m.roughnessMap = null; m.metalnessMap = null; m.aoMap = null;
       m.color.set(0xffffff); m.roughness = 1; m.metalness = 1;
       if (this.solo === 'pbr') {
@@ -112,6 +122,9 @@ export class Viewport {
       else if (this.solo === 'roughness') { if (rough) m.map = rough; m.roughness = 1; m.metalness = 0; }
       else if (this.solo === 'metalness') { if (metal) m.map = metal; }
       else if (this.solo === 'ao') { if (ao) m.map = ao; m.roughness = 1; m.metalness = 0; }
+      else if (this.solo === 'curvature') { if (curv) m.map = curv; m.roughness = 1; m.metalness = 0; }
+      else if (this.solo === 'id') { if (idm) m.map = idm; m.roughness = 0.9; m.metalness = 0; }
+      else if (this.solo === 'position') { if (posm) m.map = posm; m.roughness = 0.9; m.metalness = 0; }
       else if (this.solo === 'uv') { m.map = this.uvChecker; m.roughness = 0.9; m.metalness = 0; }
       m.needsUpdate = true;
       o.material = m;

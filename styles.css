@@ -14,6 +14,9 @@
 .rail-sep{height:1px;width:80%;background:var(--line);margin:4px 0}
 #viewportWrap{flex:1;position:relative;min-width:0;background:#111}
 #gl{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair}
+#brushCursor{position:absolute;border:1.5px solid #fff;border-radius:50%;box-shadow:0 0 0 1.5px #000, inset 0 0 0 1px rgba(0,0,0,.6);pointer-events:none;z-index:5}
+#brushCursor.erase{border-color:#ff7a7a}
+.btn:disabled{opacity:.4;cursor:default}
 #viewbar{position:absolute;left:10px;top:10px;display:flex;gap:10px;align-items:center;background:rgba(20,22,27,.85);border:1px solid var(--line);border-radius:8px;padding:6px 10px}
 #viewbar select,#viewbar input{background:var(--bg3);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
 #triCount{color:var(--dim)}

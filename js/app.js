@@ -12,7 +12,7 @@ const status = t => { $('status').textContent = t; };
 
 const viewport = new Viewport($('gl'));
 const layers = new LayerStore();
-const ui = { finalMaps: null, scheduled: false, refreshLayerPanel, scheduleComposite };
+const ui = { finalMaps: null, scheduled: false, stroking: false, refreshLayerPanel, scheduleComposite };
 const painter = new Painter(viewport, layers, ui);
 painter.onStrokeEnd = () => scheduleComposite();
 
@@ -42,7 +42,7 @@ async function setMesh(root, name) {
   setStatusMesh();
   $('dropHint').style.display = 'none';
   // reset layers to a sensible stack
-  layers.layers = []; layers._noiseCache.clear();
+  layers.layers = []; layers._noiseCache.clear(); layers.clearHistory();
   const S = +$('texSize').value; layers.setSize(S);
   layers.addFill({ name: 'Base metal', color: '#6b6f76', rough: 0.45, metal: 0.9, noise: 0.12 }, 'fill', null);
   refreshLayerPanel(); syncMaterialInputs();
@@ -103,12 +103,25 @@ function setProg(p, label) {
 }
 function updateBakeChips() {
   const el = $('bakeList'); el.innerHTML = '';
+  const soloFor = { normal: 'normal', ao: 'ao', curvature: 'curvature', position: 'position', id: 'id' };
   ['normal', 'ao', 'curvature', 'position', 'id'].forEach(k => {
     const s = document.createElement('span');
     s.textContent = k; if (baked) s.classList.add('ok');
+    if (baked && soloFor[k]) { s.title = 'Click to inspect'; s.style.cursor = 'pointer'; s.onclick = () => viewport.setSolo(soloFor[k]); }
     el.appendChild(s);
   });
 }
+
+// ---------- undo / redo ----------
+function syncHistoryButtons() {
+  const u = $('btnUndo'), r = $('btnRedo');
+  if (u) u.disabled = !layers.canUndo;
+  if (r) r.disabled = !layers.canRedo;
+}
+layers.onHistory = syncHistoryButtons;
+$('btnUndo').onclick = () => { if (layers.undo()) { scheduleComposite(); status('undo'); } };
+$('btnRedo').onclick = () => { if (layers.redo()) { scheduleComposite(); status('redo'); } };
+syncHistoryButtons();
 
 // ---------- layers ----------
 $('btnAddLayer').onclick = () => {
@@ -173,6 +186,7 @@ function syncMaterialInputs() {
 }
 $('btnApplyMask').onclick = () => {
   const l = layers.active; if (!l) return status('add a layer first');
+  layers.snapshot(l.id, 'mask');
   l.mask = buildMask($('maskGen').value, baked, layers.size);
   l.name = l.name.replace(/ \(.*\)/, '') + ` (${$('maskGen').value})`;
   refreshLayerPanel(); scheduleComposite();
@@ -180,8 +194,19 @@ $('btnApplyMask').onclick = () => {
 };
 
 // ---------- composite -> viewport ----------
-let compositeQueued = false;
+// During strokes, compositing a 1024px stack costs 50-200ms — throttle to ~12fps
+// and let stroke-end deliver the final crisp update.
+let compositeQueued = false, lastComp = 0, trailingTimer = 0;
 function scheduleComposite() {
+  if (ui.stroking) {
+    const now = performance.now();
+    if (now - lastComp < 80) {
+      clearTimeout(trailingTimer);
+      trailingTimer = setTimeout(() => { lastComp = performance.now(); compositeAndShow(); }, 85);
+      return;
+    }
+    lastComp = now;
+  }
   if (compositeQueued) return;
   compositeQueued = true;
   requestAnimationFrame(() => {
@@ -189,19 +214,17 @@ function scheduleComposite() {
     compositeAndShow();
   });
 }
-function compositeAndShow() {
-  const t0 = performance.now();
-  const maps = layers.layers.length ? layers.composite(baked) : null;
+function compositeAndShow(bleed = 3) {
+  const maps = layers.layers.length ? layers.composite(baked, bleed) : null;
   if (maps) {
     ui.finalMaps = maps;
     viewport.updateMaps({
       albedo: maps.albedo, normal: maps.normal,
       roughness: maps.roughness, metalness: maps.metalness,
-      ao: baked?.aoCanvas ?? null,
+      ao: baked?.aoCanvas ?? null, curvature: baked?.curvCanvas ?? null,
+      id: baked?.idCanvas ?? null, position: baked?.posCanvas ?? null,
     });
   }
-  // cheap status (don't spam)
-  // console.debug('composite', performance.now() - t0);
 }
 
 // ---------- tools / view ----------
@@ -211,17 +234,29 @@ document.querySelectorAll('#rail [data-tool]').forEach(b => {
     b.classList.add('active');
     painter.tool = b.dataset.tool === 'fill' ? 'paint' : b.dataset.tool;
     if (b.dataset.tool === 'fill') $('btnAddLayer').click();
-    status('tool: ' + painter.tool);
+    else status('tool: ' + painter.tool + (painter.tool === 'paint' || painter.tool === 'erase' ? ' — drag paints, Alt+drag or 🖐 orbits' : ''));
   };
 });
 $('railSolo').onclick = () => {
-  const order = ['pbr', 'albedo', 'normal', 'roughness', 'metalness', 'ao', 'uv', 'wire'];
+  const order = ['pbr', 'albedo', 'normal', 'roughness', 'metalness', 'ao', 'curvature', 'id', 'position', 'uv', 'wire'];
   viewport.setSolo(order[(order.indexOf(viewport.solo) + 1) % order.length]);
 };
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault();
+    if (e.shiftKey) { if (layers.redo()) { scheduleComposite(); status('redo'); } }
+    else if (layers.undo()) { scheduleComposite(); status('undo'); }
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+    e.preventDefault();
+    if (layers.redo()) { scheduleComposite(); status('redo'); }
+    return;
+  }
   if (e.key === 'b' || e.key === 'B') document.querySelector('[data-tool=paint]').click();
   if (e.key === 'e' || e.key === 'E') document.querySelector('[data-tool=erase]').click();
+  if (e.key === 'v' || e.key === 'V') document.querySelector('[data-tool=orbit]').click();
   if (e.key === '[') $('brushSize').value = Math.max(2, +$('brushSize').value - 8);
   if (e.key === ']') $('brushSize').value = Math.min(256, +$('brushSize').value + 8);
   const n = '1234567'.indexOf(e.key);
@@ -235,13 +270,19 @@ $('texSize').addEventListener('change', () => {
 
 // ---------- export / project ----------
 $('btnExportPNG').onclick = () => {
-  if (!ui.finalMaps) return status('nothing to export yet');
+  if (!layers.layers.length) return status('nothing to export yet');
+  status('compositing full-bleed export…');
+  // Re-composite with wide bleed so mipmaps/exports don't get dark seams at island edges.
+  compositeAndShow(10);
   const m = ui.finalMaps;
   downloadCanvas(m.albedo, 'mm_albedo.png');
   downloadCanvas(m.normal, 'mm_normal.png');
   downloadCanvas(m.roughness, 'mm_roughness.png');
   downloadCanvas(m.metalness, 'mm_metalness.png');
-  if (baked) downloadCanvas(baked.aoCanvas, 'mm_ao.png');
+  if (baked) {
+    downloadCanvas(baked.aoCanvas, 'mm_ao.png');
+    downloadCanvas(baked.curvCanvas, 'mm_curvature.png');
+  }
   status('exported PNG texture set');
 };
 $('btnExportGLB').onclick = async () => {

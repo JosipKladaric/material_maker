@@ -12,19 +12,55 @@ export class Painter {
   }
   bind() {
     const cv = this.vp.canvas;
+    this.cursor = document.createElement('div');
+    this.cursor.id = 'brushCursor';
+    this.cursor.hidden = true;
+    cv.parentElement.appendChild(this.cursor);
     cv.addEventListener('pointerdown', e => {
-      if (e.button === 2) return; // right = orbit
+      if (e.button === 2) return; // right = pan
       if (this.tool === 'picker') { this.pick(e); return; }
-      if (e.button !== 0) return;
-      this.stroking = true; cv.setPointerCapture(e.pointerId);
+      // Orbit tool or Alt held: let OrbitControls have the gesture.
+      if (this.tool === 'orbit' || e.altKey) return;
+      if (e.button !== 0 || !this.layers.active) return;
+      const b = this.brush();
+      const target = b.target === 'color' ? 'paint' : 'mask';
+      // Ensure a paint canvas exists before snapshotting color strokes on fill layers.
+      if (target === 'paint' && !this.layers.active.paint) {
+        this.layers.active.paint = document.createElement('canvas');
+        this.layers.active.paint.width = this.layers.active.paint.height = this.layers.size;
+      }
+      this.layers.snapshot(this.layers.active.id, target);
+      this.stroking = true;
+      this.ui.stroking = true;
+      this.vp.controls.enabled = false;
+      cv.setPointerCapture(e.pointerId);
       this.last = null;
       this.dab(e);
     });
-    cv.addEventListener('pointermove', e => { if (this.stroking) this.dab(e); });
+    cv.addEventListener('pointermove', e => {
+      this.moveCursor(e);
+      if (this.stroking) this.dab(e);
+    });
+    cv.addEventListener('pointerleave', () => { this.cursor.hidden = true; });
     addEventListener('pointerup', () => {
-      if (this.stroking) { this.stroking = false; this.onStrokeEnd?.(); }
+      if (this.stroking) {
+        this.stroking = false;
+        this.ui.stroking = false;
+        this.vp.controls.enabled = true;
+        this.onStrokeEnd?.();
+      }
     });
     cv.addEventListener('contextmenu', e => e.preventDefault());
+  }
+  moveCursor(e) {
+    if (this.tool === 'orbit' || this.tool === 'picker') { this.cursor.hidden = true; return; }
+    const r = this.vp.canvas.getBoundingClientRect();
+    const d = Math.max(4, +document.getElementById('brushSize').value);
+    this.cursor.hidden = false;
+    this.cursor.style.width = this.cursor.style.height = d + 'px';
+    this.cursor.style.left = (e.clientX - r.left - d / 2) + 'px';
+    this.cursor.style.top = (e.clientY - r.top - d / 2) + 'px';
+    this.cursor.classList.toggle('erase', this.tool === 'erase');
   }
   ndc(e) {
     const r = this.vp.canvas.getBoundingClientRect();
@@ -62,12 +98,8 @@ export class Painter {
     this.ui.scheduleComposite();
   }
   stamp(layer, x, y, diam, b) {
-    const target = b.target === 'color' && layer.paint ? layer.paint : layer.mask;
-    if (b.target === 'color' && !layer.paint) {
-      layer.paint = document.createElement('canvas');
-      layer.paint.width = layer.paint.height = this.layers.size;
-    }
     const cv = b.target === 'color' ? layer.paint : layer.mask;
+    if (!cv) return;
     const g = cv.getContext('2d');
     const r = Math.max(1, diam / 2);
     const grad = g.createRadialGradient(x, y, r * (1 - b.soft) * 0.5, x, y, r);

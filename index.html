@@ -35,6 +35,7 @@
   <nav id="rail">
     <button data-tool="paint" class="active" title="Paint (B)">🖌</button>
     <button data-tool="erase" title="Eraser (E)">🧽</button>
+    <button data-tool="orbit" title="Orbit camera (V) — or hold Alt while painting">🖐</button>
     <button data-tool="fill" title="Fill layer with material">🪣</button>
     <button data-tool="picker" title="Pick color/ID">💉</button>
     <div class="rail-sep"></div>
@@ -54,6 +55,9 @@
         <option value="roughness">Roughness</option>
         <option value="metalness">Metalness</option>
         <option value="ao">AO (baked)</option>
+        <option value="curvature">Curvature</option>
+        <option value="id">ID</option>
+        <option value="position">Position</option>
         <option value="uv">UV / checker</option>
         <option value="wire">Wireframe</option>
       </select>
@@ -100,7 +104,7 @@
     </section>
 
     <section class="panel grow">
-      <h3>Layers <button id="btnAddLayer" class="btn small">+ Fill</button> <button id="btnAddPaint" class="btn small">+ Paint</button></h3>
+      <h3>Layers <button id="btnAddLayer" class="btn small">+ Fill</button> <button id="btnAddPaint" class="btn small">+ Paint</button> <button id="btnUndo" class="btn small" title="Undo (Ctrl+Z)">↩</button><button id="btnRedo" class="btn small" title="Redo (Ctrl+Shift+Z)">↪</button></h3>
       <div id="layerList"></div>
     </section>
 
@@ -146,7 +150,7 @@
         </select>
         <input id="brushColor" type="color" value="#cc3333"/>
       </div>
-      <small>Paint in 3D viewport (drag). <kbd>B</kbd> paint, <kbd>E</kbd> eraser, <kbd>[</kbd><kbd>]</kbd> size. Right-drag orbits, wheel zooms.</small>
+      <small>Drag to paint. <kbd>B</kbd> paint, <kbd>E</kbd> eraser, <kbd>V</kbd> orbit, <kbd>[</kbd><kbd>]</kbd> size. Left-drag orbits with 🖐 or while holding <kbd>Alt</kbd>; wheel zooms, right-drag pans.</small>
     </section>
   </aside>
 </main>

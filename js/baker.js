@@ -169,8 +169,8 @@ async function bakeAO_CPU(meshes, maps, box, size, samples, maxDist, onProgress,
   for (let y = 0; y < w; y++) {
     if (token.cancelled) return null;
     for (let x = 0; x < w; x++) {
-      const sx = Math.min(size - 1, Math.floor(x * scale)), sy = Math.min(size - 1, Math.floor(y * scale));
-      const i = (sy * size + sx) * 4;
+      const px = Math.min(size - 1, Math.floor(x * scale)), py = Math.min(size - 1, Math.floor(y * scale));
+      const i = (py * size + px) * 4;
       const a = posD[i + 3];
       if (a < 8) { aoSmall[y * w + x] = 255; continue; }
       P.set(
